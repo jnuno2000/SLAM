@@ -1,10 +1,11 @@
 # SLAM: Simultaneous Localization and Mapping
 
 [![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)](https://www.python.org/downloads/)
-[![NumPy](https://img.shields.io/badge/NumPy-1.21+-green.svg)](https://numpy.org/)
+[![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)]()
+[![Code Style](https://img.shields.io/badge/Code%20Style-Black-black.svg)](https://github.com/psf/black)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Robotics](https://img.shields.io/badge/Domain-Robotics-red.svg)]()
-[![Kalman Filter](https://img.shields.io/badge/Algorithm-Kalman%20Filter-purple.svg)]()
+[![Kalman Filter](https://img.shields.io/badge/Algorithm-EKF--SLAM-purple.svg)]()
 
 A real-time **Simultaneous Localization and Mapping (SLAM)** system that enables autonomous robots to build maps of unknown environments while simultaneously tracking their own position. This implementation uses **Extended Kalman Filtering** for sensor fusion, combining 2D LIDAR measurements with odometry data.
 
@@ -60,31 +61,175 @@ SLAM is one of the fundamental challenges in autonomous robotics. This project d
 
 | Feature | Description |
 |---------|-------------|
+| **Modular Architecture** | Clean separation of concerns with dedicated modules for filtering, features, and visualization |
 | **Corner Detection** | Geometric algorithm using least-squares line fitting to detect room corners from LIDAR scans |
-| **Kalman Filter SLAM** | Full EKF implementation with dynamic state augmentation for discovered landmarks |
+| **EKF-SLAM** | Full Extended Kalman Filter with dynamic state augmentation for discovered landmarks |
 | **Sensor Fusion** | Combines odometry (motion model) with LIDAR observations (measurement model) |
 | **Data Association** | Distance-threshold matching to associate observations with known landmarks |
-| **Real-time Visualization** | Frame-by-frame animation of robot trajectory and map building |
+| **CLI Interface** | Command-line tool with configurable parameters for easy experimentation |
+| **Comprehensive Tests** | Unit tests for all core algorithms ensuring reliability |
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/jnuno2000/SLAM.git
+cd SLAM
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Or install as package
+pip install -e .
+```
+
+### Development Installation
+
+```bash
+# Install with dev dependencies
+pip install -e ".[dev]"
+
+# Or use make
+make install-dev
+```
+
+## Quick Start
+
+### Command Line Interface
+
+```bash
+# Run SLAM with visualization
+python main.py data.csv --visualize
+
+# Save output plot
+python main.py data.csv --output results.png
+
+# Customize parameters
+python main.py data.csv --corner-threshold 0.95 --landmark-threshold 3.0
+```
+
+### Python API
+
+```python
+from slam import SLAM, SLAMConfig
+
+# Configure SLAM parameters
+config = SLAMConfig(
+    corner_threshold=0.95,
+    landmark_association_threshold=3.0
+)
+
+# Initialize with starting pose
+slam = SLAM(initial_pose=(0, 0, 0), config=config)
+
+# Process sensor data
+for lidar_scan, odometry in sensor_stream:
+    slam.process_step(lidar_scan, odometry)
+
+# Get results
+print(f"Estimated pose: {slam.pose}")
+print(f"Landmarks found: {slam.landmark_positions}")
+```
+
+### Jupyter Notebook
+
+```bash
+jupyter notebook SLAM_localization.ipynb
+```
+
+## Project Structure
+
+```
+SLAM/
+├── slam/                       # Core SLAM package
+│   ├── __init__.py            # Package exports
+│   ├── config.py              # Configuration management
+│   ├── filters.py             # Extended Kalman Filter
+│   ├── features.py            # Corner detection & landmarks
+│   ├── slam.py                # Main SLAM class
+│   ├── utils.py               # Coordinate transforms
+│   └── visualization.py       # Plotting utilities
+├── tests/                     # Unit tests
+│   ├── test_filters.py        # EKF tests
+│   ├── test_features.py       # Feature detection tests
+│   └── test_utils.py          # Utility function tests
+├── main.py                    # CLI entry point
+├── SLAM_localization.ipynb    # Interactive notebook
+├── SLAM_localization.py       # Legacy script
+├── data.csv                   # Sample sensor data
+├── requirements.txt           # Dependencies
+├── pyproject.toml            # Package configuration
+├── Makefile                   # Development commands
+├── LICENSE                    # MIT License
+└── README.md                  # This file
+```
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run with coverage
+make test-cov
+
+# Run specific test file
+python -m pytest tests/test_filters.py -v
+```
+
+### Code Quality
+
+```bash
+# Format code
+make format
+
+# Run linter
+make lint
+
+# Type checking
+make typecheck
+```
+
+### Available Make Commands
+
+```
+make install      Install dependencies
+make install-dev  Install dev dependencies
+make test         Run unit tests
+make test-cov     Run tests with coverage
+make lint         Run code linting
+make format       Format code with black
+make clean        Remove build artifacts
+make run          Run SLAM on sample data
+```
 
 ## Technical Implementation
 
 ### Corner Detection Algorithm
 
-The system identifies room corners (landmarks) from 2D LIDAR data using a split-and-fit approach:
+The system identifies room corners from 2D LIDAR data using a split-and-fit approach:
 
 1. **Coordinate Transformation**: Convert polar LIDAR readings (r, θ) to Cartesian (x, y)
-2. **Line Fitting**: For each potential split point, fit lines to left/right segments using least-squares
-3. **Corner Verification**: Compute cross-product of line normal vectors; if |v₁ × v₂| > 0.95, a corner exists
-4. **Optimal Split**: Select the split point that minimizes total residual error
+2. **Line Fitting**: For each potential split point, fit lines to left/right segments
+3. **Corner Verification**: Compute cross-product of normal vectors; if |v₁ × v₂| > threshold, corner exists
+4. **Optimal Split**: Select the split point minimizing total residual error
 
 ```python
-# Corner detection via perpendicular line intersection
-for split_point in range(5, len(scan) - 5):
-    line_left = polyfit(points[:split_point])
-    line_right = polyfit(points[split_point:])
+# From slam/features.py
+class CornerDetector:
+    def detect(self, lidar_ranges: np.ndarray) -> Optional[Tuple[float, float]]:
+        """Detect corner in a single LIDAR scan."""
+        x_points, y_points = self._polar_to_cartesian(lidar_ranges)
 
-    if |cross(normal_left, normal_right)| > threshold:
-        corner_detected = True
+        for j in range(margin, len(x_points) - margin):
+            vec_left, res_left = self._fit_line(x_points[:j], y_points[:j])
+            vec_right, res_right = self._fit_line(x_points[j:], y_points[j:])
+
+            if abs(np.cross(vec_left, vec_right)) > self.config.corner_threshold:
+                return (x_points[j], y_points[j])
+        return None
 ```
 
 ### Extended Kalman Filter
@@ -112,73 +257,27 @@ X_k = X_{k|k-1} + K · (z - h(X_{k|k-1}))
 P_k = (I - K · H) · P_{k|k-1}
 ```
 
-Where:
-- **X**: State estimate (robot pose + landmark positions)
-- **P**: State covariance matrix (uncertainty)
-- **Q**: Process noise covariance (odometry uncertainty)
-- **R**: Measurement noise covariance (LIDAR uncertainty)
-- **H**: Jacobian of measurement function
-- **K**: Kalman gain (optimal weighting)
+### Configuration Parameters
 
-### Measurement Model
+All tunable parameters are centralized in `SLAMConfig`:
 
-Observations are made in polar form relative to the robot:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `corner_threshold` | 0.95 | Cross-product threshold for corner detection |
+| `corner_margin` | 5 | Rays to skip at scan edges |
+| `landmark_association_threshold` | 3.0 | Distance for landmark matching (meters) |
+| `process_noise_std` | 4.0 | Odometry uncertainty |
+| `measurement_noise_std` | 5.0 | LIDAR measurement uncertainty |
 
-```
-z = [r, α]ᵀ = [√((xᵢ-x)² + (yᵢ-y)²), atan2(yᵢ-y, xᵢ-x) - θ]ᵀ
-```
+## Data Format
 
-The Jacobian H is computed analytically for each observed landmark:
-
-```
-H = │ ∂r/∂x   ∂r/∂y   ∂r/∂θ   ...  ∂r/∂xᵢ   ∂r/∂yᵢ   ... │
-    │ ∂α/∂x   ∂α/∂y   ∂α/∂θ   ...  ∂α/∂xᵢ   ∂α/∂yᵢ   ... │
-```
-
-## Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/jnuno2000/SLAM.git
-cd SLAM
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Jupyter Notebook (Recommended)
-```bash
-jupyter notebook SLAM_localization.ipynb
-```
-
-### Python Script
-```bash
-python SLAM_localization.py
-```
-
-### Data Format
-
-The system expects a CSV file (`data.csv`) with the following structure:
+The system expects a CSV file with the following structure:
 
 | Columns | Description |
 |---------|-------------|
-| 0-2 | Robot pose: `px, py, theta` |
+| 0-2 | Robot pose: `px, py, theta` (ground truth) |
 | 3-5 | Odometry deltas: `dx, dy, dtheta` |
 | 6-66 | LIDAR readings: 61 range measurements (-30° to +30°) |
-
-## Project Structure
-
-```
-SLAM/
-├── SLAM_localization.ipynb  # Main implementation with visualizations
-├── SLAM_localization.py     # Python script version
-├── data.csv                 # Sensor measurements dataset
-├── requirements.txt         # Python dependencies
-├── LICENSE                  # MIT License
-└── README.md               # This file
-```
 
 ## Results
 
@@ -186,23 +285,15 @@ The system successfully:
 
 - Detects and tracks **4 room corners** as persistent landmarks
 - Maintains **consistent pose estimation** despite odometry drift
-- Produces a **coherent 2D map** that matches ground truth
-- Demonstrates the **improvement of EKF over pure odometry**
+- Produces a **coherent 2D map** matching ground truth
+- Demonstrates **EKF improvement over pure odometry**
 
-### Comparison: Odometry vs. Kalman Filter SLAM
+### Performance Comparison
 
 | Method | Position Error | Map Consistency |
 |--------|----------------|-----------------|
 | Pure Odometry | Accumulates unbounded drift | No map building |
 | EKF-SLAM | Bounded, corrected by observations | Consistent landmark positions |
-
-## Technologies
-
-- **Python 3.7+** - Core implementation
-- **NumPy** - Linear algebra and matrix operations
-- **Matplotlib** - Visualization and animation
-- **Pandas** - Data loading and manipulation
-- **SciPy** - Signal processing utilities
 
 ## Algorithm Complexity
 
@@ -214,6 +305,15 @@ The system successfully:
 
 Where n = number of landmarks, m = number of LIDAR rays (61)
 
+## Technologies
+
+- **Python 3.7+** - Core implementation
+- **NumPy** - Linear algebra and matrix operations
+- **Matplotlib** - Visualization and animation
+- **Pandas** - Data loading and manipulation
+- **SciPy** - Signal processing utilities
+- **pytest** - Unit testing framework
+
 ## Future Improvements
 
 - [ ] Implement loop closure detection for large-scale mapping
@@ -221,6 +321,7 @@ Where n = number of landmarks, m = number of LIDAR rays (61)
 - [ ] Extend to 3D SLAM using RGB-D sensors
 - [ ] Implement particle filter (FastSLAM) for comparison
 - [ ] Add occupancy grid mapping alongside feature-based approach
+- [ ] GPU acceleration for real-time performance
 
 ## References
 
